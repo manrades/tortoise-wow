@@ -493,6 +493,22 @@ void ScriptMgr::LoadScripts(ScriptMapMap& scripts, const char* tablename)
                 }
                 break;
             }
+            case SCRIPT_COMMAND_TAKE_MONEY:
+            {
+                if (!tmp.takeMoney.amount)
+                {
+                    sLog.outErrorDb("Table `%s` SCRIPT_COMMAND_TAKE_MONEY but amount is %u for script id %u",
+                                    tablename, tmp.takeMoney.amount, tmp.id);
+                    continue;
+                }
+                if (tmp.takeMoney.amount > 0x7FFFFFFF)
+                {
+                    sLog.outErrorDb("Table `%s` SCRIPT_COMMAND_TAKE_MONEY amount is too large (%u) for script id %u",
+                                    tablename, tmp.takeMoney.amount, tmp.id);
+                    continue;
+                }
+                break;
+            }
             case SCRIPT_COMMAND_DESPAWN_CREATURE:
             {
                 break;
@@ -2016,6 +2032,12 @@ bool ScriptMgr::OnGossipSelect(Player* pPlayer, GameObject* pGameObject, uint32 
             return script->OnGossipSelect(pPlayer, pGameObject, sender, action);
         }
     }
+
+    if (ScriptRegistry<AllGameObjectScript>::ForEachWithReturn([&](AllGameObjectScript* script)
+    {
+        return script->CanGameObjectGossipSelect(pPlayer, pGameObject, sender, action, code);
+    }))
+        return true;
 
 #ifdef ENABLE_ELUNA
     if (Eluna* e = pPlayer->GetEluna())
