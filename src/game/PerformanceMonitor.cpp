@@ -10,6 +10,15 @@ PerformanceMonitor::PerformanceMonitor()
 	gPerfMonitorInterface = this;
 }
 
+PerformanceMonitor::~PerformanceMonitor()
+{
+	// Allocator-backed static containers may outlive this monitor because C++ does
+	// not define destruction order across translation units. Prevent them from
+	// calling through a dangling monitor while they release their storage.
+	if (gPerfMonitorInterface == this)
+		gPerfMonitorInterface = nullptr;
+}
+
 void PerformanceMonitor::Initialize()
 {
 	// in seconds

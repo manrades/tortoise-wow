@@ -38,12 +38,14 @@
 #include "AccountMgr.h"
 #include "AuctionHouseMgr.h"
 #include "ObjectMgr.h"
+#include "ObjectAccessor.h"
 #include "CreatureEventAIMgr.h"
 #include "GuildMgr.h"
 #include "SpellMgr.h"
 #include "Chat.h"
 #include "DBCStores.h"
 #include "MassMailMgr.h"
+#include "Mail.h"
 #include "LootMgr.h"
 #include "ItemEnchantmentMgr.h"
 #include "MapManager.h"
@@ -156,6 +158,82 @@ CompanionManager sCompanionMgr;
 MountManager sMountMgr;
 ToyManager sToyMgr;
 
+namespace
+{
+void ProcessLocalGMAdminQueue()
+{
+    std::unique_ptr<QueryResult> result(CharacterDatabase.Query(
+        "SELECT id, target_guid, target_name, target_account, action, amount, item_entry "
+        "FROM gm_admin_queue WHERE status='pending' ORDER BY id LIMIT 25"));
+    if (!result)
+        return;
+
+    do
+    {
+        Field* fields = result->Fetch();
+        const uint32 id = fields[0].GetUInt32();
+        const uint32 targetGuid = fields[1].GetUInt32();
+        const std::string targetName = fields[2].GetCppString();
+        const uint32 accountId = fields[3].GetUInt32();
+        const std::string action = fields[4].GetCppString();
+        const int32 amount = fields[5].GetInt32();
+        const uint32 itemEntry = fields[6].GetUInt32();
+
+        Player* player = ObjectAccessor::FindPlayerByName(targetName.c_str());
+        const bool targetOnline = player != nullptr;
+        bool completed = false;
+        const char* message = "Unknown action";
+        if (action == "item")
+        {
+            if (targetOnline)
+            {
+                completed = player->AddItem(itemEntry, amount) != nullptr;
+                message = completed ? "Item granted" : "Inventory full or invalid item";
+            }
+            else if (Item* item = Item::CreateItem(itemEntry, amount, ObjectGuid(HIGHGUID_PLAYER, targetGuid)))
+            {
+                item->SaveToDB(true);
+                MailDraft("GM Manager Item Grant", "Your GM item grant is attached.")
+                    .AddItem(item)
+                    .SendMailTo(MailReceiver(ObjectGuid(HIGHGUID_PLAYER, targetGuid)), MailSender(MAIL_NORMAL, uint32(0), MAIL_STATIONERY_GM), MAIL_CHECK_MASK_COPIED, 0, 30 * DAY, true);
+                completed = true;
+                message = "Item sent by mail";
+            }
+            else
+                message = "Invalid item";
+        }
+        else if (action == "money")
+        {
+            if (targetOnline)
+                player->ModifyMoney(amount);
+            else
+                CharacterDatabase.PExecute("UPDATE characters SET money = LEAST(2147483647, money + %d) WHERE guid=%u", amount, targetGuid);
+            completed = true;
+            message = targetOnline ? "Gold granted" : "Gold granted offline";
+        }
+        else if (action == "shellcoin")
+        {
+            LoginDatabase.PExecute("INSERT INTO shop_coins (id, coins) VALUES (%u, %d) ON DUPLICATE KEY UPDATE coins = coins + VALUES(coins)", accountId, amount);
+            completed = true;
+            message = targetOnline ? "Turtle Coins granted" : "Turtle Coins granted offline";
+        }
+
+        if (completed)
+        {
+
+            CharacterDatabase.PExecute("UPDATE gm_admin_queue SET status='completed', result_message='%s', processed_at=UNIX_TIMESTAMP() WHERE id=%u", message, id);
+        }
+        else if (action == "item")
+        {
+            CharacterDatabase.PExecute("UPDATE gm_admin_queue SET status='failed', result_message='%s', processed_at=UNIX_TIMESTAMP() WHERE id=%u", message, id);
+        }
+        else
+        {
+            CharacterDatabase.PExecute("UPDATE gm_admin_queue SET status='failed', result_message='Unknown action', processed_at=UNIX_TIMESTAMP() WHERE id=%u", id);
+        }
+    } while (result->NextRow());
+}
+}
 /// World constructor
 World::World():
     m_playerLimit(0),
@@ -2697,6 +2775,16 @@ void World::Update(uint32 diff)
 
     ///- Update the game time and check for shutdown time
     _UpdateGameTime();
+
+    // GM Manager queue: run on the world thread so online player inventory and
+    // money state remain synchronized with the character cache.
+    static uint32 gmAdminQueueElapsed = 0;
+    gmAdminQueueElapsed += diff;
+    if (gmAdminQueueElapsed >= 1000)
+    {
+        gmAdminQueueElapsed = 0;
+        ProcessLocalGMAdminQueue();
+    }
 
     ///-Update mass mailer tasks if any
     sMassMailMgr.Update();

@@ -123,7 +123,12 @@ typedef off_t ACE_OFF_T;
 #  define I32FMT "%08I32X"
 #  define I64FMT "%016I64X"
 //#  define snprintf _snprintf
-#  define vsnprintf _vsnprintf
+// VS 2015 and newer provide the standard C99 vsnprintf. Mapping it to the
+// legacy _vsnprintf on modern MSVC also rewrites std::vsnprintf in third-party
+// headers (notably Boost), where std::_vsnprintf no longer exists.
+#  if _MSC_VER < 1900
+#    define vsnprintf _vsnprintf
+#  endif
 #  define finite(X) _finite(X)
 
 #else
