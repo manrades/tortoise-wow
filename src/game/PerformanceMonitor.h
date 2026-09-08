@@ -10,7 +10,7 @@ class ChatHandler;
 struct PerformanceMonitor : public IPerfMonitor
 {
 	PerformanceMonitor();
-	~PerformanceMonitor();
+    ~PerformanceMonitor();
 
 	void Initialize();
 	void FrameStart();

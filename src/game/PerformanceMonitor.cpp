@@ -12,11 +12,11 @@ PerformanceMonitor::PerformanceMonitor()
 
 PerformanceMonitor::~PerformanceMonitor()
 {
-	// Allocator-backed static containers may outlive this monitor because C++ does
-	// not define destruction order across translation units. Prevent them from
-	// calling through a dangling monitor while they release their storage.
-	if (gPerfMonitorInterface == this)
-		gPerfMonitorInterface = nullptr;
+    // Other global containers can be destroyed after this monitor. Unpublish
+    // before MemBytes/its mutex are destroyed, so their allocator callbacks do
+    // not enter an already-destroyed map (also affects the --version exit).
+    if (gPerfMonitorInterface == this)
+        gPerfMonitorInterface = nullptr;
 }
 
 void PerformanceMonitor::Initialize()
