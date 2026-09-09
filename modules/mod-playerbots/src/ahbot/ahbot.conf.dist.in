@@ -45,13 +45,17 @@ AuctionHouseBot.Level.MaxRequired = 60
 AuctionHouseBot.Work.BudgetUs = 2000
 AuctionHouseBot.Work.MaxOperations = 32
 # Optional external-market snapshots stored in the character database.
-# Keep disabled until complete Alliance, Horde and Neutral snapshot data has
-# been imported; missing or under-sampled items always use the native formula.
+# One complete snapshot can be shared by all local auction houses. The selected
+# source house is 1 Alliance, 6 Horde or 7 Neutral; missing or under-sampled
+# items always use the native formula.
 AhBot.CustomPriceStats.Enabled = 0
 AhBot.CustomPriceStats.MinSampleCount = 3
 # Valid values: 10, 25, 50, 75, 90. Other values use the median (50).
 AhBot.CustomPriceStats.Seller.Percentile = 50
 AhBot.CustomPriceStats.Buyer.Percentile = 25
+# Share one source snapshot across Alliance, Horde and Neutral local houses.
+AhBot.CustomPriceStats.SharedSnapshot = 1
+AhBot.CustomPriceStats.SharedAuctionHouse = 1
 
 # Commands: .ahbot reload; .ahbot rebuild [all]; .ahbot status [all];
 # .ahbot item <id> [value [chance [min [max]]]]; .ahbot item <id> reset

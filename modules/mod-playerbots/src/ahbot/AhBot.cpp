@@ -123,6 +123,11 @@ bool AhBot::Load()
     candidate.marketMinSamples = bounded("AhBot.CustomPriceStats.MinSampleCount", 3, 1, 1000000);
     candidate.marketSellPercentile = bounded("AhBot.CustomPriceStats.Seller.Percentile", 50, 10, 90);
     candidate.marketBuyPercentile = bounded("AhBot.CustomPriceStats.Buyer.Percentile", 25, 10, 90);
+    candidate.marketSharedSnapshot = config.GetBoolDefault("AhBot.CustomPriceStats.SharedSnapshot", true);
+    candidate.marketSharedAuctionHouse = bounded("AhBot.CustomPriceStats.SharedAuctionHouse", 1, 1, 7);
+    if (candidate.marketSharedAuctionHouse != 1 && candidate.marketSharedAuctionHouse != 6 &&
+        candidate.marketSharedAuctionHouse != 7)
+        candidate.marketSharedAuctionHouse = 1;
     char const* quality[] = {"Poor", "Normal", "Uncommon", "Rare", "Epic", "Legendary", "Artifact"};
     for (size_t q = 0; q < 7; ++q)
     {
@@ -295,7 +300,11 @@ bool AhBot::IsBotOwner(uint32 guid, uint32 account) const
 }
 uint32 AhBot::MarketPrice(ItemPrototype const* p, uint32 auctionHouse, bool buyer) const
 {
-    if (!settings.marketStats || !p || !auctionHouse)
+    if (!settings.marketStats || !p)
+        return 0;
+    if (settings.marketSharedSnapshot)
+        auctionHouse = settings.marketSharedAuctionHouse;
+    if (!auctionHouse)
         return 0;
     auto it = marketStats.find((uint64(auctionHouse) << 32) | p->ItemId);
     if (it == marketStats.end() || it->second.samples < settings.marketMinSamples)
