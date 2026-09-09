@@ -117,6 +117,12 @@ bool AhBot::Load()
     candidate.vendorValue = config.GetBoolDefault("AuctionHouseBot.Value.Vendor", true);
     candidate.sliceUs = bounded("AuctionHouseBot.Work.BudgetUs", 2000, 100, 10000);
     candidate.sliceOperations = bounded("AuctionHouseBot.Work.MaxOperations", 32, 1, 256);
+    // Historical snapshots are opt-in: the native policy remains the safe fallback
+    // until an administrator has imported complete market data.
+    candidate.marketStats = config.GetBoolDefault("AhBot.CustomPriceStats.Enabled", false);
+    candidate.marketMinSamples = bounded("AhBot.CustomPriceStats.MinSampleCount", 3, 1, 1000000);
+    candidate.marketSellPercentile = bounded("AhBot.CustomPriceStats.Seller.Percentile", 50, 10, 90);
+    candidate.marketBuyPercentile = bounded("AhBot.CustomPriceStats.Buyer.Percentile", 25, 10, 90);
     char const* quality[] = {"Poor", "Normal", "Uncommon", "Rare", "Epic", "Legendary", "Artifact"};
     for (size_t q = 0; q < 7; ++q)
     {
@@ -227,10 +233,33 @@ bool AhBot::Load()
         sLog.outError("[AhBot] No non-hardcore random-bot owners available; previous configuration retained.");
         return false;
     }
+    std::map<uint64, MarketStat> newMarketStats;
+    if (candidate.marketStats)
+    {
+        result.reset(CharacterDatabase.Query(
+            "SELECT item_id,auction_house,sample_count,price_p10,price_p25,price_median,price_p75,price_p90 "
+            "FROM ahbot_price_stats WHERE suffix_id=0"));
+        if (!result)
+        {
+            sLog.outError("[AhBot] CustomPriceStats is enabled but ahbot_price_stats is unavailable; previous settings retained.");
+            return false;
+        }
+        do
+        {
+            Field* f = result->Fetch();
+            uint32 item = f[0].GetUInt32(), house = f[1].GetUInt32();
+            if (!item || (house != 1 && house != 6 && house != 7))
+                continue;
+            newMarketStats[(uint64(house) << 32) | item] = {f[2].GetUInt32(), policy::Money(f[3].GetUInt64()),
+                                                              policy::Money(f[4].GetUInt64()), policy::Money(f[5].GetUInt64()),
+                                                              policy::Money(f[6].GetUInt64()), policy::Money(f[7].GetUInt64())};
+        } while (result->NextRow());
+    }
     settings = candidate;
     sources.swap(newSources);
     owners.swap(newOwners);
     overrides.swap(newOverrides);
+    marketStats.swap(newMarketStats);
     vendorItems = std::set<uint32>(vendors.begin(), vendors.end());
     maxRequiredLevel = settings.requiredLevel;
     maxItemLevel = policy::ItemLevelCap(maxRequiredLevel);
@@ -264,13 +293,31 @@ bool AhBot::IsBotOwner(uint32 guid, uint32 account) const
 {
     return guid && account && sPlayerbotAIConfig.IsInRandomAccountList(account);
 }
-uint32 AhBot::Price(ItemPrototype const* p) const
+uint32 AhBot::MarketPrice(ItemPrototype const* p, uint32 auctionHouse, bool buyer) const
+{
+    if (!settings.marketStats || !p || !auctionHouse)
+        return 0;
+    auto it = marketStats.find((uint64(auctionHouse) << 32) | p->ItemId);
+    if (it == marketStats.end() || it->second.samples < settings.marketMinSamples)
+        return 0;
+    switch (buyer ? settings.marketBuyPercentile : settings.marketSellPercentile)
+    {
+    case 10: return it->second.p10;
+    case 25: return it->second.p25;
+    case 75: return it->second.p75;
+    case 90: return it->second.p90;
+    default: return it->second.median;
+    }
+}
+uint32 AhBot::Price(ItemPrototype const* p, uint32 auctionHouse, bool buyer) const
 {
     if (!p || p->Quality >= 7 || p->Class >= 17)
         return 0;
     auto it = overrides.find(p->ItemId);
     if (it != overrides.end())
         return it->second.value;
+    if (uint32 market = MarketPrice(p, auctionHouse, buyer))
+        return market;
     return policy::Price(p->BuyPrice, p->SellPrice, p->Quality,
                          settings.vendorValue && vendorItems.count(p->ItemId) ? 100
                                                                               : settings.values[p->Quality][p->Class]);
@@ -442,7 +489,7 @@ void AhBot::PostOne()
         stock.erase(it);
         return;
     }
-    uint32 price = Varied(Price(p)), count = policy::Stack(it->second, p->Stackable, price);
+    uint32 price = Varied(Price(p, auctionIds[currentHouse])), count = policy::Stack(it->second, p->Stackable, price);
     if (!count)
     {
         stock.erase(it);
@@ -572,7 +619,7 @@ void AhBot::Buy(AuctionSnapshot const& snapshot)
     auto item = sAuctionMgr.GetAItem(auction->itemGuidLow);
     if (!item)
         return;
-    uint64 value = uint64(Varied(Price(item->GetProto()))) * item->GetCount() * settings.buyValue / 100;
+    uint64 value = uint64(Varied(Price(item->GetProto(), auctionIds[currentHouse], true))) * item->GetCount() * settings.buyValue / 100;
     uint32 bid = policy::Bid(auction->startbid, auction->bid, auction->GetAuctionOutBid(), auction->buyout, value);
     if (!bid)
         return;

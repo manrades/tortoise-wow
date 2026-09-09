@@ -42,12 +42,17 @@ class AhBot
     {
         uint32 guid, account;
     };
+    struct MarketStat
+    {
+        uint32 samples = 0, p10 = 0, p25 = 0, median = 0, p75 = 0, p90 = 0;
+    };
     struct Settings
     {
-        bool enabled = false, vendorValue = true, dynamicLevel = false, ignoreGm = false;
+        bool enabled = false, vendorValue = true, dynamicLevel = false, ignoreGm = false, marketStats = false;
         uint32 sell = 10, buy = 10, variance = 10, bidMin = 75, bidMax = 90;
         uint32 timeMin = 2, timeMax = 24, buyValue = 90, requiredLevel = 60;
-        uint32 levelRefresh = 600, sliceUs = 2000, sliceOperations = 32;
+        uint32 levelRefresh = 600, sliceUs = 2000, sliceOperations = 32, marketMinSamples = 3;
+        uint32 marketSellPercentile = 50, marketBuyPercentile = 25;
         std::array<std::array<uint32, 17>, 7> values{};
     } settings;
     enum class Phase
@@ -67,7 +72,8 @@ class AhBot
     void ScanOne(bool expire);
     void FinishPass();
     bool IsBotOwner(uint32 guid, uint32 account) const;
-    uint32 Price(ItemPrototype const*) const;
+    uint32 Price(ItemPrototype const*, uint32 auctionHouse = 0, bool buyer = false) const;
+    uint32 MarketPrice(ItemPrototype const*, uint32 auctionHouse, bool buyer) const;
     uint32 Varied(uint32) const;
     bool Eligible(ItemPrototype const*, bool forced) const;
     bool Publish(uint32 item, uint32 count, uint32 price);
@@ -79,6 +85,7 @@ class AhBot
     std::set<uint32> vendorItems;
     std::map<uint32, Override> overrides;
     std::map<uint32, uint64> stock;
+    std::map<uint64, MarketStat> marketStats;
     std::vector<AuctionSnapshot> page;
     size_t pageIndex = 0, sourceIndex = 0;
     int32 picksRemaining = -1;

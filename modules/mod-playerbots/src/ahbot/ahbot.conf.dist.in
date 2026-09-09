@@ -44,6 +44,15 @@ AuctionHouseBot.Level.MaxRequired = 60
 # Single native operations are indivisible; status reports observed slice costs.
 AuctionHouseBot.Work.BudgetUs = 2000
 AuctionHouseBot.Work.MaxOperations = 32
+# Optional external-market snapshots stored in the character database.
+# Keep disabled until complete Alliance, Horde and Neutral snapshot data has
+# been imported; missing or under-sampled items always use the native formula.
+AhBot.CustomPriceStats.Enabled = 0
+AhBot.CustomPriceStats.MinSampleCount = 3
+# Valid values: 10, 25, 50, 75, 90. Other values use the median (50).
+AhBot.CustomPriceStats.Seller.Percentile = 50
+AhBot.CustomPriceStats.Buyer.Percentile = 25
+
 # Commands: .ahbot reload; .ahbot rebuild [all]; .ahbot status [all];
 # .ahbot item <id> [value [chance [min [max]]]]; .ahbot item <id> reset
 # Rebuild preserves player bids unless 'all', uses native expiry, then simulates
