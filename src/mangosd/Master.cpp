@@ -36,7 +36,7 @@
 #include "ExecutionWatch.h"
 #include "WorldSocket.h"
 #include "WorldRunnable.h"
-#ifndef WIN32
+#ifdef ENABLE_SOAP
 #include "MaNGOSsoap.h"
 #endif
 #include <memory>
@@ -588,7 +588,7 @@ int Master::Run()
     ///- Launch WorldRunnable thread
     std::thread world_thread{WorldRunnable()};
 
-#ifndef WIN32
+#ifdef ENABLE_SOAP
     ///- Start the SOAP remote command interface (off unless SOAP.Enabled = 1)
     std::unique_ptr<SOAPThread> soapThread;
     if (sConfig.GetBoolDefault("SOAP.Enabled", false))

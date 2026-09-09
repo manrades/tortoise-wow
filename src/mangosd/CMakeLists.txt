@@ -16,6 +16,16 @@
 # Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 
 set(EXECUTABLE_NAME mangosd)
+
+# SOAP remote-command interface. The gsoap C++ runtime is vendored as a Linux
+# static lib (dep/lib/gsoap/libgsoap++.a), so SOAP does not build on Windows.
+# Default: ON for Linux, OFF for Windows. Override with -DENABLE_SOAP=ON/OFF.
+if(WIN32)
+  set(_ENABLE_SOAP_DEFAULT OFF)
+else()
+  set(_ENABLE_SOAP_DEFAULT ON)
+endif()
+option(ENABLE_SOAP "Build the SOAP remote-command interface (vendored gsoap, Linux only)" ${_ENABLE_SOAP_DEFAULT})
 set (EXECUTABLE_SRCS 
 	CliRunnable.h
 	DynamicModules.h
@@ -26,11 +36,11 @@ set (EXECUTABLE_SRCS
 	Main.cpp
 	Master.cpp
 	WorldRunnable.cpp
+
 )
 
-# The vendored gSOAP runtime archive is Unix-only. Until a matching MSVC runtime
-# is supplied, omit the optional SOAP remote-command interface on Windows.
-if(NOT WIN32)
+
+if(ENABLE_SOAP)
   list(APPEND EXECUTABLE_SRCS
     MaNGOSsoap.h
     MaNGOSsoap.cpp
@@ -40,7 +50,6 @@ if(NOT WIN32)
     soap/soapServer.cpp
   )
 endif()
-
 
 if(WIN32)
   list(APPEND EXECUTABLE_SRCS
@@ -151,11 +160,14 @@ target_link_libraries(${EXECUTABLE_NAME}
 )
 
 # SOAP remote-command interface: vendored gsoap C++ runtime (2.8.135).
-if(NOT WIN32)
+# Linux-only (vendored static lib); guard behind ENABLE_SOAP so Windows can build.
+if(ENABLE_SOAP)
+  target_compile_definitions(${EXECUTABLE_NAME} PRIVATE ENABLE_SOAP)
   target_link_libraries(${EXECUTABLE_NAME}
       ${CMAKE_SOURCE_DIR}/dep/lib/gsoap/libgsoap++.a
   )
 endif()
+
 # Boost lib search path for playerbots' transitive boost references.
 # Boost's prebuilt Windows binaries live under lib64-msvc-<toolset> (or
 # BOOST_LIBRARYDIR if the user set it explicitly).
