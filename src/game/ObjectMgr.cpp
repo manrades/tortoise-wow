@@ -9564,7 +9564,7 @@ void ObjectMgr::LoadShop()
     m_ShopCategoriesMap.clear();
     m_shopLogs.clear();
 
-    QueryResult* result = WorldDatabase.Query("SELECT ID, Name, Name_loc4, icon FROM shop_categories");
+    QueryResult* result = WorldDatabase.Query("SELECT ID, parent_id, Name, Name_loc4, icon FROM shop_categories");
 
     if (!result)
         return;
@@ -9574,11 +9574,13 @@ void ObjectMgr::LoadShop()
         Field* fields = result->Fetch();
 
         uint8 id = fields[0].GetUInt8();
-        std::string name = fields[1].GetString();
-        std::string name_loc4 = fields[2].GetString();
-        std::string icon = fields[3].GetString();
+        uint8 parentId = fields[1].GetUInt8();
+        std::string name = fields[2].GetString();
+        std::string name_loc4 = fields[3].GetString();
+        std::string icon = fields[4].GetString();
 
         ShopCategory shopcategory;
+        shopcategory.ParentId = parentId;
         shopcategory.Name = name;
         shopcategory.Name_loc4 = name_loc4;
         shopcategory.Icon = icon;

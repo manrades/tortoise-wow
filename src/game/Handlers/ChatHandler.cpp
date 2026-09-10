@@ -1243,19 +1243,16 @@ bool WorldSession::HandleTurtleAddonMessages(uint32 lang, uint32 type, std::stri
                 // ONLY the "About" tab and no categories at all - About renders
                 // because the client injects it itself as a synthetic
                 // `0=0=About=about;` entry (four fields, parses fine) before
-                // the server's first real category kills the loop.
-                // This server has no subcategories (shop_categories has no
-                // parent column), so parentId is always 0 = top-level.
-                // The sibling "Entries:" reply below was already fixed for this
-                // client's 13-field format (see ObjectMgr::LoadShop) - only the
-                // category line was missed at the time.
+                // the server's first real category kills the loop. parent_id is
+                // data-driven: 0 denotes a top-level tab, otherwise it names
+                // another category that the client renders as its parent.
                 std::string categories = "Categories:";
 
                 for (auto& itr : sObjectMgr.GetShopCategoriesList())
-                    if (sWorld.getConfig(CONFIG_BOOL_SEA_NETWORK))
-                        categories += std::to_string(itr.first) + "=0=" + itr.second.Name_loc4 + "=" + itr.second.Icon + ";";
+                    if (_player->GetSession()->GetSessionDbcLocale() == LOCALE_zhCN)
+                        categories += std::to_string(itr.first) + "=" + std::to_string(itr.second.ParentId) + "=" + itr.second.Name_loc4 + "=" + itr.second.Icon + ";";
                     else
-                        categories += std::to_string(itr.first) + "=0=" + itr.second.Name + "=" + itr.second.Icon + ";";
+                        categories += std::to_string(itr.first) + "=" + std::to_string(itr.second.ParentId) + "=" + itr.second.Name + "=" + itr.second.Icon + ";";
 
                 _player->SendAddonMessage(prefix, categories);
                 return true;
@@ -1290,9 +1287,35 @@ bool WorldSession::HandleTurtleAddonMessages(uint32 lang, uint32 type, std::stri
                 {
                     const ShopCategory& ShopCat = ShopIter->second;
 
-                    for (const std::string& EntryStr : ShopCat.CachedItemEntries)
+                    const int localeIndex = _player->GetSession()->GetSessionDbLocaleIndex();
+                    for (const ShopEntry& Entry : ShopCat.Items)
                     {
-                        _player->SendAddonMessage(prefix, EntryStr);
+                        ItemPrototype const* itemPrototype = sObjectMgr.GetItemPrototype(Entry.Item);
+                        if (!itemPrototype)
+                            continue;
+
+                        std::string itemName = itemPrototype->Name1;
+                        if (localeIndex >= 0)
+                        {
+                            if (ItemLocale const* itemLocale = sObjectMgr.GetItemLocale(Entry.Item))
+                            {
+                                if (itemLocale->Name.size() > size_t(localeIndex) && !itemLocale->Name[localeIndex].empty())
+                                    itemName = itemLocale->Name[localeIndex];
+                            }
+                        }
+
+                        // Build the item name per request: locale belongs to
+                        // the session, while the old cache is realm-wide.
+                        char entryBuffer[1024];
+                        int32 formatResult = std::snprintf(entryBuffer, sizeof(entryBuffer),
+                            "Entries:%u=%u=%s=%u==%u=%u=%u=%.02f=%.02f=%.02f=%.02f=%u",
+                            Entry.Category, 0u, itemName.c_str(), Entry.Price,
+                            Entry.Item, Entry.ModelID, Entry.ItemDisplayID,
+                            Entry.Position.x, Entry.Position.y, Entry.Position.z,
+                            Entry.Rotation, 0u);
+
+                        if (formatResult > 0 && formatResult < int32(sizeof(entryBuffer)))
+                            _player->SendAddonMessage(prefix, entryBuffer);
                     }
                 }
 

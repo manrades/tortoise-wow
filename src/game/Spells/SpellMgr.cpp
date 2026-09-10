@@ -3569,6 +3569,34 @@ void SpellMgr::LoadSpells()
     }
 
     LoadSpellExtra();
+
+    // DBC remains the source of spell mechanics when LoadSpellsFromSql is
+    // disabled, but spell_template remains the authoritative binding table
+    // for C++ SpellScript handlers. Without this pass, collection items cast
+    // their DBC spell but never execute the registered collection handler.
+    uint32 scriptBindingCount = 0;
+    std::unique_ptr<QueryResult> scriptResult(WorldDatabase.Query(
+        "SELECT `entry`, `script_name` FROM `spell_template` WHERE `script_name` <> ''"));
+    if (scriptResult)
+    {
+        do
+        {
+            Field* fields = scriptResult->Fetch();
+            uint32 spellId = fields[0].GetUInt32();
+            if (spellId >= mSpellEntryMap.size() || !mSpellEntryMap[spellId])
+            {
+                sLog.outErrorDb("Table `spell_template` assigns script `%s` to nonexistent DBC spell %u, skipped.",
+                    fields[1].GetString(), spellId);
+                continue;
+            }
+
+            mSpellEntryMap[spellId]->ScriptId = sScriptMgr.GetScriptId(fields[1].GetString());
+            ++scriptBindingCount;
+        }
+        while (scriptResult->NextRow());
+    }
+
+    sLog.outString("Loaded %u spell script bindings from `spell_template`.", scriptBindingCount);
 }
 
 void SpellMgr::LoadSpellExtra()

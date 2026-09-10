@@ -211,3 +211,14 @@ Knowing that a service touches `SPELL_EFFECT_LEARN_SPELL` is only the start. The
 - Existing architecture tests are under [tests/architecture](../tests/architecture). `ContentHookContract.cmake` checks source wiring by lexical/regex assertions; passing it does not establish exactly-once execution or all boss mechanics.
 - Diagnostic controls/removal belong in the existing [diagnostic inventory](../doc/TURTLE_DIAGNOSTICS.md), not scattered permanent logs. Disabled summary logging does not necessarily remove timers/atomics.
 - Record source revision and fresh evidence on every significant update. Repository documentation makes the knowledge reusable; it does not make an assistant infallible or remove the need to reopen current source.
+
+### Shop category hierarchy
+
+The Turtle shop add-on consumes categories as `id=parentId=name=icon;`. A
+zero `parentId` is a top-level tab; a nonzero value must identify another
+returned category and is rendered by the client as its child. `shop_categories.parent_id`
+is the data contract, loaded by `ObjectMgr::LoadShop` and forwarded unchanged
+by `ChatHandler::HandlePlayerChatAddonOpcode`. Shop entries refer to the leaf
+category through `shop_items.category`; purchasing remains item-entry based.
+Regression check: request categories in zhCN and enUS, confirm each child
+names parent 7, request every leaf list, buy one leaf item, then reload the

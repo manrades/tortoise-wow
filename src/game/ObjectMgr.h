@@ -94,6 +94,7 @@ typedef robin_hood::unordered_map<uint32, ShopEntry> ShopEntriesMap;
 
 struct ShopCategory
 {
+    uint8 ParentId = 0;
 	std::string Name;
 	std::string Name_loc4;
 	std::string Icon;
