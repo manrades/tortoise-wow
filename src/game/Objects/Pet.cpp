@@ -1773,13 +1773,13 @@ void Pet::_SaveSpells()
                 SqlStatement stmt = CharacterDatabase.CreateStatement(delSpell, "DELETE FROM pet_spell WHERE guid = ? and spell = ?");
                 stmt.PExecute(m_charmInfo->GetPetNumber(), itr->first);
 
-                stmt = CharacterDatabase.CreateStatement(insSpell, "INSERT INTO pet_spell (guid,spell,active) VALUES (?, ?, ?)");
+                stmt = CharacterDatabase.CreateStatement(insSpell, "INSERT INTO pet_spell (guid,spell,active) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE active = VALUES(active)");
                 stmt.PExecute(m_charmInfo->GetPetNumber(), itr->first, uint32(itr->second.active));
             }
             break;
             case PETSPELL_NEW:
             {
-                SqlStatement stmt = CharacterDatabase.CreateStatement(insSpell, "INSERT INTO pet_spell (guid,spell,active) VALUES (?, ?, ?)");
+                SqlStatement stmt = CharacterDatabase.CreateStatement(insSpell, "INSERT INTO pet_spell (guid,spell,active) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE active = VALUES(active)");
                 stmt.PExecute(m_charmInfo->GetPetNumber(), itr->first, uint32(itr->second.active));
             }
             break;
