@@ -7562,11 +7562,6 @@ void SpellAuraHolder::SetAuraFlag(uint32 slot, bool add)
     m_target->SetUInt32Value(UNIT_FIELD_AURAFLAGS + index, val);
 }
 
-void SpellAuraHolder::SetAura(uint32 slot, bool remove)
-{
-    m_target->SetUInt32Value(UNIT_FIELD_AURA + slot, remove ? 0 : GetId());
-}
-
 void SpellAuraHolder::SetAuraLevel(uint32 slot, uint32 level)
 {
     uint32 index    = slot / 4;
