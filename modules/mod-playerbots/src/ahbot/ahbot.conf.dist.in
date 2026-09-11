@@ -36,6 +36,9 @@ AuctionHouseBot.Time.Min = 2
 AuctionHouseBot.Time.Max = 24
 # Applied to buyer valuation; zero disables profitable bids/buyouts.
 AuctionHouseBot.Buy.Value = 80
+# For a real-player listing tied for the lowest active per-item buyout, chance
+# to buy out directly before falling back to the normal valuation policy.
+AuctionHouseBot.Buy.LowestPriceChance = 80
 AuctionHouseBot.Level.DynamicMaxRequired = 0
 AuctionHouseBot.Level.IgnoreGmAccounts = 0
 AuctionHouseBot.Level.DynamicRefreshInterval = 10

@@ -39,6 +39,7 @@ or database-persistence test.
 | Packet ownership | [WorldSession.cpp](../src/game/WorldSession.cpp), `ProcessPackets` at 480; opcode registration/filter definitions | A handler must execute in the context its opcode permits. Extra queue-drain checkpoints must consume packets, not replay them. Synthetic bot packets retain handlers but intentionally have different socket admission. |
 | Persistence | [Database sources](../src/shared/Database), native entity save methods | SQL worker execution and application of results are different ownership stages. Priority queues can reorder work across priorities; callbacks and object references must survive cancellation/shutdown safely. |
 | Maintenance | [RandomPlayerbotMgr.cpp](../modules/mod-playerbots/src/playerbot/RandomPlayerbotMgr.cpp), auction module | Population counts include pending work; resumable plans need identity/generation checks. A cooperative budget cannot interrupt a single expensive operation. Preserve native final teleport/auction operations. |
+| AHBot lowest-price purchase | [AhBot.cpp](../modules/mod-playerbots/src/ahbot/AhBot.cpp), `AhBot::Buy` | The world-owner scan revalidates an auction under its native house lock. A real-player listing tied for the lowest active per-item buyout may settle directly by configurable probability; all other listings retain the snapshot/native valuation path. Compare price as buyout/count without rounding, and do not retain live auction pointers across a slice. |
 
 There is no source evidence in these inspected paths of two complete simulation engines. That does **not** mean the architecture port is behavior-neutral, or that every shared-state race is excluded. See findings A1–A6 in the audit.
 
@@ -218,7 +219,10 @@ The Turtle shop add-on consumes categories as `id=parentId=name=icon;`. A
 zero `parentId` is a top-level tab; a nonzero value must identify another
 returned category and is rendered by the client as its child. `shop_categories.parent_id`
 is the data contract, loaded by `ObjectMgr::LoadShop` and forwarded unchanged
-by `ChatHandler::HandlePlayerChatAddonOpcode`. Shop entries refer to the leaf
-category through `shop_items.category`; purchasing remains item-entry based.
-Regression check: request categories in zhCN and enUS, confirm each child
-names parent 7, request every leaf list, buy one leaf item, then reload the
+by `ChatHandler::HandlePlayerChatAddonOpcode`. For nested tabs, the client
+requests the parent category and filters its returned `Entries:` rows by the
+second wire field: `shop_items.category` therefore remains the parent (fashion
+is 7), while `shop_items.subcategory` stores the leaf (9–20). Purchasing
+remains item-entry based. Regression check: request categories in zhCN and
+enUS, confirm each child names parent 7, request category 7 and verify each
+row carries its leaf id, select every leaf, buy one leaf item, then reload the

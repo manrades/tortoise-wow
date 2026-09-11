@@ -9593,7 +9593,7 @@ void ObjectMgr::LoadShop()
 
     m_ShopEntriesMap.clear();
 
-    result = WorldDatabase.Query("SELECT ID, category, item, model_id, item_id, description, description_loc4, price, region_locked, position_x, position_y, position_z, rotation, scale FROM shop_items");
+    result = WorldDatabase.Query("SELECT ID, category, item, model_id, item_id, description, description_loc4, price, region_locked, position_x, position_y, position_z, rotation, scale, subcategory FROM shop_items");
 
     if (!result)
         return;
@@ -9604,6 +9604,7 @@ void ObjectMgr::LoadShop()
 
         uint32 id = fields[0].GetUInt32();
         uint8 category = fields[1].GetUInt8();
+        uint8 subcategory = fields[14].GetUInt8();
         uint32 item = fields[2].GetUInt32();
         uint32 ModelID = fields[3].GetUInt32();
         uint32 ItemID = fields[4].GetUInt32();
@@ -9628,6 +9629,7 @@ void ObjectMgr::LoadShop()
         ShopEntry shopentry;
         shopentry.shopId = id;
         shopentry.Category = category;
+        shopentry.Subcategory = subcategory;
         shopentry.Item = item;
         shopentry.ModelID = ModelID;
         shopentry.ItemDisplayID = ItemID;
@@ -9736,7 +9738,7 @@ void ObjectMgr::LoadShop()
             // line 285. Send empty string at info[5] so the message fits.
 			int32 FormatResult = std::snprintf(CachedEntry.data(), 1024, "Entries:%u=%u=%s=%u==%u=%u=%u=%.02f=%.02f=%.02f=%.02f=%u",
                 Entry.Category,
-                0u,                         // 2: subcategory (server has no per-row subcategory; default 0)
+                Entry.Subcategory,           // 2: client-side filter for a visual subcategory
 				ItemName.c_str(),
                 Entry.Price,
                                             // 5: description — empty (see comment above)

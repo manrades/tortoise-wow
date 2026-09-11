@@ -78,6 +78,9 @@ struct ShopEntry
 {
     uint32 shopId;
     uint32 Category;
+    // The client fetches the parent category once and filters the received
+    // rows by this value when a visual subcategory is selected.
+    uint32 Subcategory;
     uint32 Item;
     uint32 ModelID;
     uint32 ItemDisplayID;

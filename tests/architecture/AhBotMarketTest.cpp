@@ -57,6 +57,7 @@ struct AuctionHouseObject {
     AuctionEntry* GetAuction(uint32 id){auto i=entries.find(id);return i==entries.end()?nullptr:i->second;}
     void AddAuction(AuctionEntry* a){CHECK(a->ownerAccount==20);CHECK(a->deposit==0);entries[a->Id]=a;}
     void ExpireAuction(AuctionEntry* a){++expired;entries.erase(a->Id);delete a;}
+    std::pair<std::map<uint32,AuctionEntry*>::iterator,std::map<uint32,AuctionEntry*>::iterator> GetAuctionsBounds_locked(){return {entries.begin(),entries.end()};}
     std::vector<AuctionSnapshot> GetAuctionsSnapshotPage(uint32 after,uint32 limit){
         std::vector<AuctionSnapshot> out;
         for(auto i=entries.upper_bound(after);i!=entries.end()&&out.size()<limit;++i){auto a=i->second;out.push_back({a->Id,a->itemGuidLow,a->itemTemplate,a->owner,a->ownerAccount,a->startbid,a->bid,a->buyout,a->bidder,a->auctionHouseEntry->houseId,a->itemCount,a->expireTime});}return out;
@@ -162,9 +163,20 @@ int main(){
     // Native buyer: bid does not prematurely settle; buyout refunds then settles.
     resetMarket();auto a=addAuction(11,30,10);auto item=Item::CreateItem(1,2);sAuctionMgr.AddAItem(item);
     a->itemGuidLow=item->guid;a->itemTemplate=1;a->startbid=10;a->buyout=1000;
-    b.settings.buyValue=100;auto snap=market.GetAuctionsSnapshotPage(0,1)[0];
+    b.settings.buyValue=100;b.settings.lowestPriceBuyChance=0;auto snap=market.GetAuctionsSnapshotPage(0,1)[0];
     b.Buy(snap);CHECK(market.GetAuction(a->Id));CHECK(a->bidder==10);CHECK(a->bid==11);CHECK(sAuctionMgr.refunds==1);
     a->bidder=11;a->buyout=50;auto id=a->Id;b.Buy(snap);CHECK(!market.GetAuction(id));CHECK(sAuctionMgr.refunds==2);
+    // A lowest real-player unit buyout settles at the configured fixed chance,
+    // independently of the normal valuation; an unsuccessful roll falls back.
+    resetMarket();b.settings.buyValue=0;b.settings.lowestPriceBuyChance=80;
+    auto low=addAuction(11,30);auto lowItem=Item::CreateItem(1,2);sAuctionMgr.AddAItem(lowItem);
+    low->itemGuidLow=lowItem->guid;low->itemTemplate=1;low->itemCount=2;low->startbid=1;low->buyout=1000;
+    auto higher=addAuction(12,30);auto higherItem=Item::CreateItem(1,1);sAuctionMgr.AddAItem(higherItem);
+    higher->itemGuidLow=higherItem->guid;higher->itemTemplate=1;higher->itemCount=1;higher->startbid=1;higher->buyout=501;
+    randomValue=0;auto lowId=low->Id;b.Buy(market.GetAuctionsSnapshotPage(0,1)[0]);CHECK(!market.GetAuction(lowId));CHECK(market.GetAuction(higher->Id));
+    resetMarket();auto missed=addAuction(11,30);auto missedItem=Item::CreateItem(1,1);sAuctionMgr.AddAItem(missedItem);
+    missed->itemGuidLow=missedItem->guid;missed->itemTemplate=1;missed->itemCount=1;missed->startbid=1;missed->buyout=1000;
+    randomValue=80;b.Buy(market.GetAuctionsSnapshotPage(0,1)[0]);CHECK(market.GetAuction(missed->Id));
     // Bound each tick even when a rebuild has unlimited remaining stock.
     b.phase=AhBot::Phase::Post;b.stock[1]=10000;b.settings.sliceOperations=2;b.settings.sliceUs=100000;
     before=b.listed;b.Update();CHECK(b.listed-before==2);CHECK(b.stock[1]>0);

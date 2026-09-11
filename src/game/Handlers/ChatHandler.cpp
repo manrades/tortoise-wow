@@ -1309,7 +1309,7 @@ bool WorldSession::HandleTurtleAddonMessages(uint32 lang, uint32 type, std::stri
                         char entryBuffer[1024];
                         int32 formatResult = std::snprintf(entryBuffer, sizeof(entryBuffer),
                             "Entries:%u=%u=%s=%u==%u=%u=%u=%.02f=%.02f=%.02f=%.02f=%u",
-                            Entry.Category, 0u, itemName.c_str(), Entry.Price,
+                            Entry.Category, Entry.Subcategory, itemName.c_str(), Entry.Price,
                             Entry.Item, Entry.ModelID, Entry.ItemDisplayID,
                             Entry.Position.x, Entry.Position.y, Entry.Position.z,
                             Entry.Rotation, 0u);

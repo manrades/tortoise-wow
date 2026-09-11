@@ -9140,6 +9140,7 @@ DROP TABLE IF EXISTS `shop_items`;
 CREATE TABLE `shop_items` (
   `id` int(11) unsigned NOT NULL AUTO_INCREMENT,
   `category` tinyint(3) unsigned NOT NULL DEFAULT 0,
+  `subcategory` tinyint(3) unsigned NOT NULL DEFAULT 0,
   `item` int(11) unsigned NOT NULL DEFAULT 0,
   `model_id` int(10) unsigned NOT NULL DEFAULT 0,
   `item_id` int(10) unsigned NOT NULL DEFAULT 0,

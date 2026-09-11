@@ -50,7 +50,7 @@ class AhBot
     {
         bool enabled = false, vendorValue = true, dynamicLevel = false, ignoreGm = false, marketStats = false, marketSharedSnapshot = true;
         uint32 sell = 10, buy = 10, variance = 10, bidMin = 75, bidMax = 90;
-        uint32 timeMin = 2, timeMax = 24, buyValue = 90, requiredLevel = 60;
+        uint32 timeMin = 2, timeMax = 24, buyValue = 90, lowestPriceBuyChance = 80, requiredLevel = 60;
         uint32 levelRefresh = 600, sliceUs = 2000, sliceOperations = 32, marketMinSamples = 3;
         uint32 marketSellPercentile = 50, marketBuyPercentile = 25, marketSharedAuctionHouse = 1;
         std::array<std::array<uint32, 17>, 7> values{};

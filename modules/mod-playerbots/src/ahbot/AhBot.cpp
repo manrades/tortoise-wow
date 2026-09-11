@@ -110,6 +110,7 @@ bool AhBot::Load()
     candidate.timeMax = bounded("AuctionHouseBot.Time.Max", 24, 1, 72);
     candidate.timeMin = std::min(candidate.timeMin, candidate.timeMax);
     candidate.buyValue = bounded("AuctionHouseBot.Buy.Value", 90, 0, 200);
+    candidate.lowestPriceBuyChance = bounded("AuctionHouseBot.Buy.LowestPriceChance", 80, 0, 100);
     candidate.requiredLevel = bounded("AuctionHouseBot.Level.MaxRequired", 60, 1, 255);
     candidate.dynamicLevel = config.GetBoolDefault("AuctionHouseBot.Level.DynamicMaxRequired", false);
     candidate.ignoreGm = config.GetBoolDefault("AuctionHouseBot.Level.IgnoreGmAccounts", false);
@@ -628,8 +629,37 @@ void AhBot::Buy(AuctionSnapshot const& snapshot)
     auto item = sAuctionMgr.GetAItem(auction->itemGuidLow);
     if (!item)
         return;
-    uint64 value = uint64(Varied(Price(item->GetProto(), auctionIds[currentHouse], true))) * item->GetCount() * settings.buyValue / 100;
-    uint32 bid = policy::Bid(auction->startbid, auction->bid, auction->GetAuctionOutBid(), auction->buyout, value);
+    // Player listings tied for the lowest active per-item buyout can be
+    // bought directly, while all other listings retain native valuation.
+    bool lowestPlayerBuyout = false;
+    if (!IsBotOwner(auction->owner, auction->ownerAccount) && auction->buyout && auction->itemCount)
+    {
+        lowestPlayerBuyout = true;
+        uint64 const ownPrice = uint64(auction->buyout) * auction->itemCount;
+        auto const bounds = house->GetAuctionsBounds_locked();
+        for (auto entry = bounds.first; entry != bounds.second; ++entry)
+        {
+            AuctionEntry const* other = entry->second;
+            if (!other || other == auction || other->itemTemplate != auction->itemTemplate || !other->buyout ||
+                !other->itemCount || other->expireTime <= time(nullptr))
+                continue;
+            if (uint64(other->buyout) * auction->itemCount < ownPrice * other->itemCount)
+            {
+                lowestPlayerBuyout = false;
+                break;
+            }
+        }
+    }
+
+    uint32 bid = 0;
+    if (lowestPlayerBuyout && urand(1, 100) <= settings.lowestPriceBuyChance)
+        bid = auction->buyout;
+    else
+    {
+        uint64 value = uint64(Varied(Price(item->GetProto(), auctionIds[currentHouse], true))) * item->GetCount() *
+                       settings.buyValue / 100;
+        bid = policy::Bid(auction->startbid, auction->bid, auction->GetAuctionOutBid(), auction->buyout, value);
+    }
     if (!bid)
         return;
     if (auction->bidder)
