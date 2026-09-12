@@ -204,6 +204,9 @@ public:
         time_t EventTimeSyncTimer;
         time_t OfflineGroupBotsTimer;
         uint32 AddRandomBots();
+        uint32 GetQueueDrivenExtraTarget();
+        bool HasQueueDrivenActiveRun() const;
+        uint32 effectivePopulationTarget = 0;
         bool ProcessBot(uint32 bot);
         void ScheduleRandomize(uint32 bot, uint32 time);
         void RandomTeleport(Player* bot);
@@ -322,6 +325,11 @@ public:
         void PruneEventCacheSlice();
         BarGoLink* loginProgressBar;
         std::list<uint32> currentBots;
+        uint32 queueDrivenBgDemand = 0;
+        uint32 queueDrivenLfgDemand = 0;
+        uint32 queueDrivenHeldExtra = 0;
+        time_t queueDrivenLastActivity = 0;
+        time_t queueDrivenLastDemand = 0;
         std::list<uint32> arenaTeamMembers;
         uint32 bgBotsCount;
         uint32 playersLevel = 0;

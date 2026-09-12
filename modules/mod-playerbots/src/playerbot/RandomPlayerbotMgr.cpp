@@ -653,6 +653,66 @@ void RandomPlayerbotMgr::LogPlayerLocation()
     }
 }
 
+bool RandomPlayerbotMgr::HasQueueDrivenActiveRun() const
+{
+    bool active = false;
+    const_cast<RandomPlayerbotMgr*>(this)->ForEachPlayerbot([&](Player* bot)
+    {
+        if (!bot || active)
+            return;
+
+        if (bot->InBattleGround() || bot->InBattleGroundQueue())
+        {
+            active = true;
+            return;
+        }
+
+        Map* map = bot->GetMap();
+        Group* group = bot->GetGroup();
+        if (!map || !map->Instanceable() || !group)
+            return;
+
+        for (GroupReference* ref = group->GetFirstMember(); ref; ref = ref->next())
+        {
+            Player* member = ref->getSource();
+            if (member && !GetBotAI(member))
+            {
+                active = true;
+                return;
+            }
+        }
+    });
+    return active;
+}
+
+uint32 RandomPlayerbotMgr::GetQueueDrivenExtraTarget()
+{
+    if (!sPlayerbotAIConfig.queueDrivenBots || !sPlayerbotAIConfig.queueDrivenBotCap)
+        return 0;
+
+    const time_t now = time(nullptr);
+    const uint32 requested = std::min(sPlayerbotAIConfig.queueDrivenBotCap,
+        queueDrivenBgDemand + queueDrivenLfgDemand);
+    if (requested)
+    {
+        queueDrivenHeldExtra = std::max(queueDrivenHeldExtra, requested);
+        queueDrivenLastDemand = now;
+        queueDrivenLastActivity = now;
+    }
+    else if (HasQueueDrivenActiveRun())
+    {
+        queueDrivenLastActivity = now;
+    }
+
+    if (!requested && queueDrivenHeldExtra &&
+        now > queueDrivenLastActivity + sPlayerbotAIConfig.queueDrivenLogoutDelay)
+    {
+        queueDrivenHeldExtra = 0;
+    }
+
+    return std::min(queueDrivenHeldExtra, sPlayerbotAIConfig.queueDrivenBotCap);
+}
+
 void RandomPlayerbotMgr::UpdateAIInternal(uint32 elapsed, bool minimal)
 {
     ExecutionWatch::Scope maintenanceWatch(ExecutionWatch::BotMaintenance);
@@ -751,6 +811,14 @@ void RandomPlayerbotMgr::UpdateAIInternal(uint32 elapsed, bool minimal)
         pmo.reset();
     }
 
+    // Refresh queue demand before population admission. The normal calls later
+    // in this update become no-ops because their 30-second timers are current.
+    if (sPlayerbotAIConfig.queueDrivenBots)
+    {
+        if (sPlayerbotAIConfig.randomBotJoinLfg) CheckLfgQueue();
+        if (sPlayerbotAIConfig.randomBotJoinBG) CheckBgQueue();
+    }
+
     DetailedWork::Scope populationWork(DetailedWork::Population);
     ExecutionWatch::Scope populationWatch(ExecutionWatch::BotPopulation);
     uint32 maxAllowedBotCount = GetEventValue(0, "bot_count");
@@ -765,6 +833,11 @@ void RandomPlayerbotMgr::UpdateAIInternal(uint32 elapsed, bool minimal)
             sPlayerbotAIConfig.maxRandomBots, maxAllowedBotCount);
     }
 
+    const uint32 queueDrivenExtra = GetQueueDrivenExtraTarget();
+    effectivePopulationTarget = maxAllowedBotCount + queueDrivenExtra;
+    if (effectivePopulationTarget < maxAllowedBotCount)
+        effectivePopulationTarget = std::numeric_limits<uint32>::max();
+
     uint32 onlineBotCount = GetPlayerbotsAmount();
 
     // The original manager only stopped admitting bots when a target was
@@ -772,9 +845,9 @@ void RandomPlayerbotMgr::UpdateAIInternal(uint32 elapsed, bool minimal)
     // the surplus in the same bounded batches used for admission. Prefer free
     // bots so a bot currently helping a real player is not torn out from under
     // them. The next manager passes continue until the requested target is met.
-    if (onlineBotCount > maxAllowedBotCount)
+    if (onlineBotCount > effectivePopulationTarget)
     {
-        uint32 excess = onlineBotCount - maxAllowedBotCount;
+        uint32 excess = onlineBotCount - effectivePopulationTarget;
         uint32 logoutBudget = std::max<uint32>(1, sPlayerbotAIConfig.randomBotsMaxLoginsPerInterval);
         logoutBudget = std::min(logoutBudget, excess);
 
@@ -813,12 +886,12 @@ void RandomPlayerbotMgr::UpdateAIInternal(uint32 elapsed, bool minimal)
     SetAIInternalUpdateDelay(sPlayerbotAIConfig.randomBotUpdateInterval);
 
     auto pmo = sPerformanceMonitor.start(PERF_MON_RNDBOT,
-        onlineBotCount < maxAllowedBotCount ? "RandomPlayerbotMgr::Login" : "RandomPlayerbotMgr::UpdateAIInternal");
+        onlineBotCount < effectivePopulationTarget ? "RandomPlayerbotMgr::Login" : "RandomPlayerbotMgr::UpdateAIInternal");
 
     if (time(nullptr) > (EventTimeSyncTimer + 30))
         SaveCurTime();
 
-    if (availableBotCount < maxAllowedBotCount && !sWorld.IsShutdowning())
+    if (availableBotCount < effectivePopulationTarget && !sWorld.IsShutdowning())
     {
         bool logInAllowed = true;
         if (sPlayerbotAIConfig.randomBotLoginWithPlayer)
@@ -882,7 +955,7 @@ void RandomPlayerbotMgr::UpdateAIInternal(uint32 elapsed, bool minimal)
 
     uint32 maxLogins = BackgroundLoginBudget(sPlayerbotAIConfig.randomBotsMaxLoginsPerInterval);
     uint64 const admitted = uint64(onlineBotCount) + GetPendingBotLoginCount();
-    maxLogins = std::min<uint32>(maxLogins, admitted < maxAllowedBotCount ? uint32(maxAllowedBotCount - admitted) : 0);
+    maxLogins = std::min<uint32>(maxLogins, admitted < effectivePopulationTarget ? uint32(effectivePopulationTarget - admitted) : 0);
     size_t const pendingBotDbWork = CharacterDatabase.GetPendingAsyncOperationCount() +
         CharacterDatabase.GetPendingResultCount();
     if (sPlayerbotAIConfig.randomBotLoginDbQueueLimit &&
@@ -900,7 +973,7 @@ void RandomPlayerbotMgr::UpdateAIInternal(uint32 elapsed, bool minimal)
     }
 
     //Log in bots
-    if (sRandomPlayerbotMgr.GetDatabaseDelay("CharacterDatabase") < 10 * IN_MILLISECONDS && !sPlayerbotAIConfig.asyncBotLogin && onlineBotCount < maxAllowedBotCount && maxLogins > 0)
+    if (sRandomPlayerbotMgr.GetDatabaseDelay("CharacterDatabase") < 10 * IN_MILLISECONDS && !sPlayerbotAIConfig.asyncBotLogin && onlineBotCount < effectivePopulationTarget && maxLogins > 0)
     {
         availableBots.sort();
         auto loginResume = std::find_if(availableBots.begin(), availableBots.end(),
@@ -917,7 +990,7 @@ void RandomPlayerbotMgr::UpdateAIInternal(uint32 elapsed, bool minimal)
             if (GetEventValue(bot, "login"))
                 continue;
 
-            if (onlineBotCount >= maxAllowedBotCount)
+            if (onlineBotCount >= effectivePopulationTarget)
                 break;
 
             if (ProcessBot(bot)) {
@@ -1320,7 +1393,7 @@ bool RandomPlayerbotMgr::GetNamedLocation(std::string const& name, WorldLocation
 
 uint32 RandomPlayerbotMgr::AddRandomBots()
 {
-    uint32 maxAllowedBotCount = GetEventValue(0, "bot_count");    
+    uint32 maxAllowedBotCount = effectivePopulationTarget ? effectivePopulationTarget : GetEventValue(0, "bot_count");
     uint32 currentAllowedBotCount = maxAllowedBotCount;
 
     uint32 maxLevel = sWorld.getConfig(CONFIG_UINT32_MAX_PLAYER_LEVEL);
@@ -1499,7 +1572,12 @@ uint32 RandomPlayerbotMgr::AddRandomBots()
                     }
 
                     BOTPROBE(band, 6);
+                    const bool queueDrivenAdmission = sPlayerbotAIConfig.queueDrivenBots &&
+                        currentBots.size() >= GetEventValue(0, "bot_count");
                     SetEventValue(guid, "add", 1, urand(sPlayerbotAIConfig.minRandomBotInWorldTime, sPlayerbotAIConfig.maxRandomBotInWorldTime));
+                    if (queueDrivenAdmission)
+                        SetEventValue(guid, "queue_driven", 1, -1);
+                    else
                     SetEventValue(guid, "logout", 0, 0);
                     currentBots.push_back(guid);
 
@@ -2014,6 +2092,29 @@ void RandomPlayerbotMgr::CheckBgQueue()
     }
 
     sLog.outDetail("BG Queue check finished");
+    queueDrivenBgDemand = 0;
+    if (sPlayerbotAIConfig.queueDrivenBots)
+    {
+        for (int bracket = BG_BRACKET_ID_FIRST; bracket < MAX_BATTLEGROUND_BRACKETS; ++bracket)
+        {
+            for (int queue = BATTLEGROUND_QUEUE_AV; queue < MAX_BATTLEGROUND_QUEUE_TYPES; ++queue)
+            {
+                BattleGroundQueueTypeId queueType = BattleGroundQueueTypeId(queue);
+                if (!NeedBots[queue][bracket][0] && !NeedBots[queue][bracket][1]) continue;
+                BattleGround* templ = sBattleGroundMgr.GetBattleGroundTemplate(sServerFacade.BgTemplateId(queueType));
+                if (!templ) continue;
+                const uint32 perTeam = templ->GetMinPlayersPerTeam();
+                for (uint32 team = 0; team < 2; ++team)
+                {
+                    const uint32 present = BgPlayers[queue][bracket][team] + BgBots[queue][bracket][team];
+                    if (NeedBots[queue][bracket][team] && present < perTeam)
+                        queueDrivenBgDemand += perTeam - present;
+                }
+            }
+        }
+        queueDrivenBgDemand = std::min(queueDrivenBgDemand, sPlayerbotAIConfig.queueDrivenBotCap);
+    }
+
     return;
 }
 
@@ -2030,6 +2131,9 @@ void RandomPlayerbotMgr::CheckLfgQueue()
     // Clear LFG list
     LfgDungeons[HORDE].clear();
     LfgDungeons[ALLIANCE].clear();
+
+    uint32 queueDrivenLfgMissing = 0;
+    std::set<uint32> countedLfgGroups;
 
     for (auto i : players)
     {
@@ -2137,6 +2241,18 @@ void RandomPlayerbotMgr::CheckLfgQueue()
                     for (auto dungeon : dList)
                     {
                         LfgDungeons[player->GetTeam()].push_back(dungeon);
+        if (sPlayerbotAIConfig.queueDrivenBots && isLFG)
+        {
+            Group* queuedGroup = player->GetGroup();
+            if (queuedGroup)
+            {
+                if (countedLfgGroups.insert(queuedGroup->GetId()).second)
+                    queueDrivenLfgMissing += 5 - std::min<uint32>(5, queuedGroup->GetMembersCount());
+            }
+            else
+                queueDrivenLfgMissing += 4;
+        }
+
                     }
                 }
             }
@@ -2181,6 +2297,11 @@ void RandomPlayerbotMgr::CheckLfgQueue()
     */
 #endif
 
+    queueDrivenLfgDemand = 0;
+    if (sPlayerbotAIConfig.queueDrivenBots)
+    {
+        queueDrivenLfgDemand = std::min(sPlayerbotAIConfig.queueDrivenBotCap, queueDrivenLfgMissing);
+    }
     if (sPlayerbotAIConfig.logRandomBotJoinLfg)
     {
        if (LfgDungeons[ALLIANCE].size() || LfgDungeons[HORDE].size())
@@ -2525,6 +2646,14 @@ bool RandomPlayerbotMgr::ProcessBot(uint32 bot)
     bool botsAllowedInWorld = !sPlayerbotAIConfig.randomBotLoginWithPlayer || (!players.empty() && sWorld.GetActiveSessionCount() > 0);
 
     bool isValid = true;
+    const bool queueDrivenBot = sPlayerbotAIConfig.queueDrivenBots && GetEventValue(bot, "queue_driven");
+    const bool queueDrivenRun = player && (player->InBattleGround() || player->InBattleGroundQueue() ||
+        (player->GetMap() && player->GetMap()->Instanceable() && player->GetGroup()));
+    if (queueDrivenBot && queueDrivenRun)
+    {
+        // Do not let normal rotation expiry remove a bot from a real queued run.
+        SetEventValue(bot, "add", 1, sPlayerbotAIConfig.queueDrivenLogoutDelay + 60);
+    }
    
     if (sPlayerbotAIConfig.randomBotTimedLogout && !GetEventValue(bot, "add") && !sPlayerbotAIConfig.asyncBotLogin) // RandomBotInWorldTime is expired.
         isValid = false;

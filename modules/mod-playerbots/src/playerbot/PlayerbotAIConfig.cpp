@@ -394,6 +394,10 @@ bool PlayerbotAIConfig::Initialize()
     logRandomBotJoinLfg = config.GetBoolDefault("AiPlayerbot.LogRandomBotJoinLfg", false);
     randomBotJoinBG = config.GetBoolDefault("AiPlayerbot.RandomBotJoinBG", true);
     randomBotAutoJoinBG = config.GetBoolDefault("AiPlayerbot.RandomBotAutoJoinBG", false);
+    // Disabled by default so existing realms retain their current behavior.
+    queueDrivenBots = config.GetBoolDefault("AiPlayerbot.QueueDrivenBots", false);
+    queueDrivenBotCap = config.GetIntDefault("AiPlayerbot.QueueDrivenBotCap", 80);
+    queueDrivenLogoutDelay = config.GetIntDefault("AiPlayerbot.QueueDrivenLogoutDelay", 20 * MINUTE);
     randomBotBracketCount = config.GetIntDefault("AiPlayerbot.RandomBotBracketCount", 3);
     logInGroupOnly = config.GetBoolDefault("AiPlayerbot.LogInGroupOnly", true);
     logValuesPerTick = config.GetBoolDefault("AiPlayerbot.LogValuesPerTick", false);

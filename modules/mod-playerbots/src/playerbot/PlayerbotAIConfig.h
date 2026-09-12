@@ -200,6 +200,10 @@ public:
     bool logRandomBotJoinLfg;
     bool randomBotJoinBG;
     bool randomBotAutoJoinBG;
+    // The idle population remains unchanged; queue demand may add temporary bots.
+    bool queueDrivenBots;
+    uint32 queueDrivenBotCap;
+    uint32 queueDrivenLogoutDelay;
     uint32 randomBotBracketCount;
     bool randomBotLoginAtStartup;
     uint32 randomBotTeleLevel;

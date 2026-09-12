@@ -97,6 +97,13 @@ bool LfgJoinAction::JoinLFG()
     //bool raid = (urand(0, 100) < 50 && visitor.count[ITEM_QUALITY_EPIC] >= 5 && (bot->GetLevel() == 60 || bot->GetLevel() == 70 || bot->GetLevel() == 80));
 
     MeetingStoneSet stones = sWorld.GetLFGQueue().GetDungeonsForPlayer(bot);
+    // Penqle's LFG shim has no MeetingStone DBC lookup. The real player's queue
+    // already carries the meeting-stone area, so use it directly.
+    std::vector<uint32> dungeons = sRandomPlayerbotMgr.LfgDungeons[bot->GetTeam()];
+    if (dungeons.empty())
+        return false;
+
+#if 0
     if (!stones.size())
         return false;
 
@@ -150,6 +157,16 @@ bool LfgJoinAction::JoinLFG()
     uint32 dungeon = urand(0, selected.size() - 1);
     MeetingStoneInfo stoneInfo = selected[dungeon];
     BotRoles botRoles = AiFactory::GetPlayerRoles(bot);
+#endif
+    BotRoles botRoles = AiFactory::GetPlayerRoles(bot);
+    std::vector<uint32> selected;
+    for (uint32 queueEntry : dungeons)
+        if (uint32 const areaId = queueEntry & 0xFFFF)
+            selected.push_back(areaId);
+    if (selected.empty())
+        return false;
+    uint32 const dungeonId = selected[urand(0, selected.size() - 1)];
+
     std::string _botRoles;
     switch (botRoles)
     {
@@ -177,9 +194,9 @@ bool LfgJoinAction::JoinLFG()
     if (idx.empty())
         return false;*/
 
-    sLog.outDetail("Bot #%d %s:%d <%s>: uses LFG, Dungeon - %s (%s)", bot->GetGUIDLow(), bot->GetTeam() == ALLIANCE ? "A" : "H", bot->GetLevel(), bot->GetName(), stoneInfo.name, _botRoles.c_str());
+    sLog.outDetail("Bot #%d %s:%d <%s>: uses LFG, meeting-stone area %u (%s)", bot->GetGUIDLow(), bot->GetTeam() == ALLIANCE ? "A" : "H", bot->GetLevel(), bot->GetName(), dungeonId, _botRoles.c_str());
 
-    sLFGMgr.AddToQueue(bot, stoneInfo.area);
+    sLFGMgr.AddToQueue(bot, dungeonId);
 #endif
 #ifdef MANGOSBOT_ONE
     uint32 zoneLFG = 0;
