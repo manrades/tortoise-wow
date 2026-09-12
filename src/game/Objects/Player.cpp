@@ -3325,7 +3325,10 @@ Creature* Player::FindNearestInteractableNpcWithFlag(uint32 npcFlags) const
     MaNGOS::NearestInteractableNpcWithFlag u_check(this, npcFlags);
     MaNGOS::CreatureLastSearcher<MaNGOS::NearestInteractableNpcWithFlag> searcher(pCreature, u_check);
 
-    Cell::VisitGridObjects(this, searcher, INTERACTION_DISTANCE);
+    // Service companions are stored in the world object container as Pet instances,
+    // not in the grid creature container. Include both so proximity-gated protocols
+    // such as TW_TRANSMOG can work with a companion as well as a static NPC.
+    Cell::VisitAllObjects(this, searcher, INTERACTION_DISTANCE);
 
     return pCreature;
 }
