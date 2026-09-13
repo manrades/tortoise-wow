@@ -220,7 +220,14 @@ void PlayerbotHolder::HandlePlayerBotLoginCallback(QueryResult* /*dummy*/, SqlQu
         // A failed/rejected completion must not leave a permanent "login" event.
         sRandomPlayerbotMgr.SetValue(info.botGuid.GetCounter(), "login", 0);
         uint32 const target = sRandomPlayerbotMgr.GetValue(uint32(0), "bot_count");
-        if (GetPlayerbotsAmount() >= target && !sRandomPlayerbotMgr.IsExternallyManaged(info.botGuid.GetCounter()))
+        // Queue-driven battleground/LFG reserves are intentionally admitted
+        // beyond the ordinary random-bot population target. They have already
+        // been selected by the bounded demand calculation; rejecting them here
+        // leaves the real player permanently waiting in the queue.
+        bool const queueDriven = sPlayerbotAIConfig.queueDrivenBots &&
+            sRandomPlayerbotMgr.GetValue(info.botGuid.GetCounter(), "queue_driven");
+        if (GetPlayerbotsAmount() >= target && !queueDriven &&
+            !sRandomPlayerbotMgr.IsExternallyManaged(info.botGuid.GetCounter()))
         {
             delete holder;
             return;
