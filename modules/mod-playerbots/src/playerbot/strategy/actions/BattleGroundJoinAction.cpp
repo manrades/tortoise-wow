@@ -771,12 +771,11 @@ bool BGJoinAction::JoinQueue(uint32 type)
         return false;
     }*/
 
-   // get BG MapId
-#ifdef MANGOSBOT_ZERO
-   uint32 mapId = GetBattleGrounMapIdByTypeId(bgTypeId);
-#else
-   uint32 bgTypeId_ = bgTypeId;
-#endif
+   // CMSG_BATTLEMASTER_JOIN carries the battleground map ID, not the type ID.
+   // WSG, for example, is type 2 but map 489.
+   uint32 const mapId = GetBattleGrounMapIdByTypeId(bgTypeId);
+   if (!mapId)
+       return false;
    uint32 instanceId = 0; // 0 = First Available
    uint8 joinAsGroup = bot->GetGroup() && bot->GetGroup()->IsLeader(bot->GetObjectGuid());
    bool isPremade = false;
@@ -916,7 +915,7 @@ bool BGJoinAction::JoinQueue(uint32 type)
                                                                                                                                                                                                       "");
    if (!isArena)
    {
-       packet << guid << bgTypeId_ << instanceId << joinAsGroup;
+        packet << guid << mapId << instanceId << joinAsGroup;
    }
    else
    {
