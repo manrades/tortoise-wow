@@ -406,8 +406,13 @@ bool BGJoinAction::canJoinBg(Player* player, BattleGroundQueueTypeId queueTypeId
     if (player->InBattleGroundQueueForBattleGroundQueueType(queueTypeId))
         return false;
 
-    // check too low/high level
-    if (!player->GetBGAccessByLevel(bgTypeId))
+    // Core has already accepted a matching real-player queue at this level.
+    // A queue-driven reserve must use that same bracket even if the regular
+    // playerbot level gate is stricter than the core's current policy.
+    bool const queueDriven = sPlayerbotAIConfig.queueDrivenBots &&
+        sRandomPlayerbotMgr.GetValue(bot->GetGUIDLow(), "queue_driven");
+    if (!player->GetBGAccessByLevel(bgTypeId) &&
+        !(queueDriven && player == bot))
         return false;
 
     // check bracket
@@ -623,6 +628,15 @@ bool BGJoinAction::isUseful()
     if (!sPlayerbotAIConfig.randomBotJoinBG)
         return false;
 
+    bool const queueDriven = sPlayerbotAIConfig.queueDrivenBots &&
+        sRandomPlayerbotMgr.GetValue(bot->GetGUIDLow(), "queue_driven");
+
+    // Queue-driven reserves mirror an existing real player's exact queue.
+    // Do not let the normal random-bot minimum-level selector reject them.
+    if (queueDriven)
+        return !bot->InBattleGround() && !bot->InBattleGroundQueue() &&
+            bot->CanJoinToBattleground() && bot->HasFreeBattleGroundQueueId();
+
     // can't queue in BG
     if (bot->InBattleGround())
         return false;
@@ -746,11 +760,13 @@ bool BGJoinAction::JoinQueue(uint32 type)
     // check if already in queue
     bool alreadyQueued = bot->InBattleGroundQueueForBattleGroundQueueType(queueTypeId);
     bool hasAccess = bot->GetBGAccessByLevel(bgTypeId);
+    bool const queueDriven = sPlayerbotAIConfig.queueDrivenBots &&
+        sRandomPlayerbotMgr.GetValue(bot->GetGUIDLow(), "queue_driven");
     if (alreadyQueued)
         return false;
 
     // check bg req level
-    if (!hasAccess)
+    if (!hasAccess && !queueDriven)
         return false;
 
     // get BattleMaster unit
