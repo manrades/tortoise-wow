@@ -1791,7 +1791,6 @@ void RandomPlayerbotMgr::ForceQueueDrivenBattlegroundBots()
         if (!reserve)
             continue;
 
-        uint32 assignedReserves = 0;
         do
         {
             Field* fields = reserve->Fetch();
@@ -1801,7 +1800,7 @@ void RandomPlayerbotMgr::ForceQueueDrivenBattlegroundBots()
                 GetEventValue(guid, "queue_driven"))
                 continue;
 
-            if (assignedReserves >= request.missing)
+            if (!request.missing)
                 break;
 
             SetEventValue(guid, "queue_driven", 1, -1);
@@ -1810,11 +1809,30 @@ void RandomPlayerbotMgr::ForceQueueDrivenBattlegroundBots()
             SetEventValue(guid, "login", 0, 0);
             sLog.outDetail("Queue-driven BG: reserve bot #%u assigned to queue %u bracket %u team %u",
                 guid, request.queueType, request.bracket, request.team);
-            ++assignedReserves;
+            --request.missing;
         } while (reserve->NextRow());
     }
 }
 
+bool RandomPlayerbotMgr::JoinQueueDrivenBattleground(Player* bot)
+{
+    if (!sPlayerbotAIConfig.queueDrivenBots || !bot || bot->InBattleGround() || bot->InBattleGroundQueue())
+        return false;
+
+    uint32 const queueType = GetEventValue(bot->GetGUIDLow(), "queue_driven_bg");
+    if (!queueType)
+        return false;
+
+    PlayerbotAI* ai = GetBotAI(bot);
+    if (!ai || ai->HasRealPlayerMaster())
+        return false;
+
+    ai->GetAiObjectContext()->GetValue<uint32>("bg type")->Set(queueType);
+    bool const queued = ai->DoSpecificAction("bg join", Event(), true);
+    sLog.outString("QUEUE_DRIVEN_BG_JOIN guid=%u queue=%u level=%u result=%s",
+        bot->GetGUIDLow(), queueType, bot->GetLevel(), queued ? "queued" : "rejected");
+    return queued;
+}
 void RandomPlayerbotMgr::LoadBattleMastersCache()
 {
     BattleMastersCache.clear();
@@ -4508,15 +4526,6 @@ void RandomPlayerbotMgr::OnBotLoginInternal(Player * const bot)
         // Make a newly admitted bot eligible for the requesting player's level
         // bracket before its ordinary AI maintenance cycle runs.
         RandomizeFirst(bot);
-
-        uint32 const queueType = GetEventValue(bot->GetGUIDLow(), "queue_driven_bg");
-        PlayerbotAI* ai = GetBotAI(bot);
-        if (queueType && ai && !bot->InBattleGroundQueue())
-        {
-            ai->GetAiObjectContext()->GetValue<uint32>("bg type")->Set(queueType);
-            if (ai->DoSpecificAction("bg join", Event(), true))
-                sLog.outDetail("Queue-driven BG: fresh bot #%u <%s> joined queue %u", bot->GetGUIDLow(), bot->GetName(), queueType);
-        }
     }
 
     sLog.outDetail("%u/%d Bot %s logged in", GetPlayerbotsAmount(), sRandomPlayerbotMgr.GetMaxAllowedBotCount(), bot->GetName());

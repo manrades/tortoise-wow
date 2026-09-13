@@ -98,6 +98,7 @@ public:
         void Randomize(Player* bot);
         void RandomizeFirst(Player* bot);
         void UpdateGearSpells(Player* bot);
+        bool JoinQueueDrivenBattleground(Player* bot);
         // Pinned bots: kept logged in, never relocated. See PinnedBots in the config.
         bool IsPinnedBot(uint32 guidLow);
         void EnsurePinnedBotsOnline();

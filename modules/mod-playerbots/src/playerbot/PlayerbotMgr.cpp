@@ -967,6 +967,9 @@ void PlayerbotHolder::OnBotLogin(Player * const bot)
 
     ai->ResetStrategies();
 
+    if (this == &sRandomPlayerbotMgr)
+        sRandomPlayerbotMgr.JoinQueueDrivenBattleground(bot);
+
     if (master && !master->IsTaxiFlying())
     {
         bot->GetMotionMaster()->MovementExpired();
