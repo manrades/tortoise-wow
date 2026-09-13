@@ -708,6 +708,15 @@ uint32 RandomPlayerbotMgr::GetQueueDrivenExtraTarget()
         now > queueDrivenLastActivity + sPlayerbotAIConfig.queueDrivenLogoutDelay)
     {
         queueDrivenHeldExtra = 0;
+        ForEachPlayerbot([&](Player* bot)
+        {
+            if (!bot || !GetEventValue(bot->GetGUIDLow(), "queue_driven"))
+                return;
+
+            SetEventValue(bot->GetGUIDLow(), "queue_driven", 0, 0);
+            SetEventValue(bot->GetGUIDLow(), "queue_driven_level", 0, 0);
+            SetEventValue(bot->GetGUIDLow(), "queue_driven_bg", 0, 0);
+        });
     }
 
     return std::min(queueDrivenHeldExtra, sPlayerbotAIConfig.queueDrivenBotCap);
@@ -835,6 +844,10 @@ void RandomPlayerbotMgr::UpdateAIInternal(uint32 elapsed, bool minimal)
 
     const uint32 queueDrivenExtra = GetQueueDrivenExtraTarget();
     effectivePopulationTarget = maxAllowedBotCount + queueDrivenExtra;
+    // Queue demand is in addition to whatever idle bots are already online.
+    if (queueDrivenBgDemand && effectivePopulationTarget < GetPlayerbotsAmount() + queueDrivenBgDemand)
+        effectivePopulationTarget = GetPlayerbotsAmount() + queueDrivenBgDemand;
+
     if (effectivePopulationTarget < maxAllowedBotCount)
         effectivePopulationTarget = std::numeric_limits<uint32>::max();
 
@@ -856,6 +869,10 @@ void RandomPlayerbotMgr::UpdateAIInternal(uint32 elapsed, bool minimal)
         ForEachPlayerbot([&](Player* bot)
         {
             if (!bot || logoutCandidates.size() >= logoutBudget || IsPinnedBot(bot->GetGUIDLow()))
+                return;
+
+            if (GetEventValue(bot->GetGUIDLow(), "queue_driven") ||
+                bot->InBattleGround() || bot->InBattleGroundQueue())
                 return;
 
             PlayerbotAI* ai = GetBotAI(bot);
@@ -1448,6 +1465,14 @@ uint32 RandomPlayerbotMgr::AddRandomBots()
         currentAllowedBotCount = currentAllowedBotCount*2;      
 
         bool enoughBotsForCriteria = true;
+        QueueDrivenBgRequest* queueRequest = nullptr;
+        if (sPlayerbotAIConfig.queueDrivenBots)
+            for (QueueDrivenBgRequest& request : queueDrivenBgRequests)
+                if (request.missing)
+                {
+                    queueRequest = &request;
+                    break;
+                }
 
         for (uint32 noCriteria = 0; noCriteria < 3; noCriteria++)
         {
@@ -1530,6 +1555,9 @@ uint32 RandomPlayerbotMgr::AddRandomBots()
                     uint32 level = fields[1].GetUInt32();
                     uint32 totaltime = fields[2].GetUInt32();
                     uint32 race = fields[3].GetUInt32();
+                    if (queueRequest && (Player::TeamForRace(uint8(race)) == ALLIANCE ? 0u : 1u) != queueRequest->team)
+                        continue;
+
                     uint32 cls = fields[4].GetUInt32();
 
                     uint32 const band = std::min<uint32>(level / 10, 6);
@@ -1572,12 +1600,26 @@ uint32 RandomPlayerbotMgr::AddRandomBots()
                     }
 
                     BOTPROBE(band, 6);
-                    const bool queueDrivenAdmission = sPlayerbotAIConfig.queueDrivenBots &&
-                        currentBots.size() >= GetEventValue(0, "bot_count");
+                    const bool queueDrivenAdmission = queueRequest != nullptr;
                     SetEventValue(guid, "add", 1, urand(sPlayerbotAIConfig.minRandomBotInWorldTime, sPlayerbotAIConfig.maxRandomBotInWorldTime));
                     if (queueDrivenAdmission)
+                    {
                         SetEventValue(guid, "queue_driven", 1, -1);
+
+                        SetEventValue(guid, "queue_driven_level", queueRequest->level, -1);
+                        SetEventValue(guid, "queue_driven_bg", queueRequest->queueType, -1);
+                        --queueRequest->missing;
+                        if (!queueRequest->missing)
+                        {
+                            queueRequest = nullptr;
+                            for (QueueDrivenBgRequest& request : queueDrivenBgRequests)
+                                if (request.missing) { queueRequest = &request; break; }
+                        }
+                    }
                     else
+                    {
+                        SetEventValue(guid, "queue_driven", 0, 0);
+                    }
                     SetEventValue(guid, "logout", 0, 0);
                     currentBots.push_back(guid);
 
@@ -1679,6 +1721,43 @@ uint32 RandomPlayerbotMgr::AddRandomBots()
     return currentBots.size();
 }
 
+void RandomPlayerbotMgr::ForceQueueDrivenBattlegroundBots()
+{
+    if (!sPlayerbotAIConfig.queueDrivenBots || queueDrivenBgRequests.empty())
+        return;
+
+    for (QueueDrivenBgRequest& request : queueDrivenBgRequests)
+    {
+        if (!request.missing)
+            continue;
+
+        BattleGroundTypeId const bgType = sServerFacade.BgTemplateId(BattleGroundQueueTypeId(request.queueType));
+        ForEachPlayerbot([&](Player* bot)
+        {
+            if (!bot || !request.missing || bot->InBattleGround() || bot->InBattleGroundQueue())
+                return;
+
+            if ((bot->GetTeam() == ALLIANCE ? 0u : 1u) != request.team || !bot->CanJoinToBattleground())
+                return;
+
+            if (sBattleGroundMgr.GetBattleGroundBracketIdFromLevel(bgType, bot->GetLevel()) != request.bracket)
+                return;
+
+            PlayerbotAI* ai = GetBotAI(bot);
+            if (!ai || ai->HasRealPlayerMaster())
+                return;
+
+            ai->GetAiObjectContext()->GetValue<uint32>("bg type")->Set(request.queueType);
+            if (ai->DoSpecificAction("bg join", Event(), true))
+            {
+                --request.missing;
+                sLog.outDetail("Queue-driven BG: bot #%u <%s> joins queue %u bracket %u team %u",
+                    bot->GetGUIDLow(), bot->GetName(), request.queueType, request.bracket, request.team);
+            }
+        });
+    }
+}
+
 void RandomPlayerbotMgr::LoadBattleMastersCache()
 {
     BattleMastersCache.clear();
@@ -1765,6 +1844,8 @@ void RandomPlayerbotMgr::CheckBgQueue()
 
     sLog.outDetail("Checking BG Queue...");
 
+    std::map<uint64, uint32> queueDrivenLevels;
+
     for (int i = BG_BRACKET_ID_FIRST; i < MAX_BATTLEGROUND_BRACKETS; ++i)
     {
         for (int j = BATTLEGROUND_QUEUE_AV; j < MAX_BATTLEGROUND_QUEUE_TYPES; ++j)
@@ -1816,6 +1897,11 @@ void RandomPlayerbotMgr::CheckBgQueue()
 
             BattleGroundBracketId bracketId = pvpDiff->GetBracketId();
 #endif
+            if (sPlayerbotAIConfig.queueDrivenBots && !GetBotAI(player))
+            {
+                uint64 const key = (uint64(queueTypeId) << 32) | uint64(bracketId);
+                queueDrivenLevels.emplace(key, player->GetLevel());
+            }
 #ifdef MANGOSBOT_TWO
             /* to fix
             if (ArenaType arenaType = sServerFacade.BgArenaType(queueTypeId))
@@ -2093,6 +2179,7 @@ void RandomPlayerbotMgr::CheckBgQueue()
 
     sLog.outDetail("BG Queue check finished");
     queueDrivenBgDemand = 0;
+    queueDrivenBgRequests.clear();
     if (sPlayerbotAIConfig.queueDrivenBots)
     {
         for (int bracket = BG_BRACKET_ID_FIRST; bracket < MAX_BATTLEGROUND_BRACKETS; ++bracket)
@@ -2107,11 +2194,28 @@ void RandomPlayerbotMgr::CheckBgQueue()
                 for (uint32 team = 0; team < 2; ++team)
                 {
                     const uint32 present = BgPlayers[queue][bracket][team] + BgBots[queue][bracket][team];
-                    if (NeedBots[queue][bracket][team] && present < perTeam)
-                        queueDrivenBgDemand += perTeam - present;
+                    if (!NeedBots[queue][bracket][team] || present >= perTeam)
+                        continue;
+                    uint32 const missing = perTeam - present;
+                    queueDrivenBgDemand += missing;
+                    uint64 const key = (uint64(queueType) << 32) | uint64(bracket);
+                    auto const level = queueDrivenLevels.find(key);
+                    if (level == queueDrivenLevels.end())
+                        continue;
+                    QueueDrivenBgRequest request;
+                    request.queueType = queue;
+                    request.bracket = bracket;
+                    request.level = level->second;
+                    request.team = team;
+                    request.missing = missing;
+                    queueDrivenBgRequests.push_back(request);
                 }
             }
         }
+        ForceQueueDrivenBattlegroundBots();
+        queueDrivenBgDemand = 0;
+        for (QueueDrivenBgRequest const& request : queueDrivenBgRequests)
+            queueDrivenBgDemand += request.missing;
         queueDrivenBgDemand = std::min(queueDrivenBgDemand, sPlayerbotAIConfig.queueDrivenBotCap);
     }
 
@@ -3717,11 +3821,13 @@ void RandomPlayerbotMgr::UpdateGearSpells(Player* bot)
     // schedule randomise
     uint32 randomTime = urand(sPlayerbotAIConfig.minRandomBotRandomizeTime, sPlayerbotAIConfig.maxRandomBotRandomizeTime);
     SetEventValue(bot->GetGUIDLow(), "randomize", 1, randomTime);
+
 }
 
 void RandomPlayerbotMgr::RandomizeFirst(Player* bot)
 {
     uint32 maxLevel = sPlayerbotAIConfig.randomBotMaxLevel;
+    uint32 const queueDrivenLevel = GetEventValue(bot->GetGUIDLow(), "queue_driven_level");
     if (maxLevel > sWorld.getConfig(CONFIG_UINT32_MAX_PLAYER_LEVEL))
         maxLevel = sWorld.getConfig(CONFIG_UINT32_MAX_PLAYER_LEVEL);
 
@@ -3729,15 +3835,19 @@ void RandomPlayerbotMgr::RandomizeFirst(Player* bot)
     if (sPlayerbotAIConfig.syncLevelWithPlayers)
         maxLevel = std::max(sPlayerbotAIConfig.randomBotMinLevel, std::min(playersLevel+ sPlayerbotAIConfig.syncLevelMaxAbove, sWorld.getConfig(CONFIG_UINT32_MAX_PLAYER_LEVEL)));
 
+    if (queueDrivenLevel)
+        maxLevel = queueDrivenLevel;
+
     auto pmo = sPerformanceMonitor.start(PERF_MON_RNDBOT, "RandomizeFirst");
-    uint32 level = urand(std::max(uint32(sWorld.getConfig(CONFIG_UINT32_START_PLAYER_LEVEL)), sPlayerbotAIConfig.randomBotMinLevel), maxLevel);
+    uint32 level = queueDrivenLevel ? queueDrivenLevel : urand(
+        std::max(uint32(sWorld.getConfig(CONFIG_UINT32_START_PLAYER_LEVEL)), sPlayerbotAIConfig.randomBotMinLevel), maxLevel);
 
 #ifdef MANGOSBOT_TWO
-    if (bot->getClass() == CLASS_DEATH_KNIGHT)
+    if (bot->getClass() == CLASS_DEATH_KNIGHT && !queueDrivenLevel)
         level = urand(std::max(bot->GetLevel(), sWorld.getConfig(CONFIG_UINT32_START_HEROIC_PLAYER_LEVEL)), std::max(sWorld.getConfig(CONFIG_UINT32_START_HEROIC_PLAYER_LEVEL), maxLevel));
 #endif
 
-    if (urand(0, 100) < 100 * sPlayerbotAIConfig.randomBotMaxLevelChance && level < maxLevel)
+    if (!queueDrivenLevel && urand(0, 100) < 100 * sPlayerbotAIConfig.randomBotMaxLevelChance && level < maxLevel)
         level = maxLevel;
 
 #ifndef MANGOSBOT_ZERO
@@ -4327,6 +4437,23 @@ void RandomPlayerbotMgr::OnBotLoginInternal(Player * const bot)
     if (pendingTeleportGuids.erase(bot->GetGUIDLow()))
         for (auto& plan : teleportPlans)
             if (plan.guid == bot->GetGUIDLow()) plan.guid = 0;
+
+    if (sPlayerbotAIConfig.queueDrivenBots && GetEventValue(bot->GetGUIDLow(), "queue_driven"))
+    {
+        // Make a newly admitted bot eligible for the requesting player's level
+        // bracket before its ordinary AI maintenance cycle runs.
+        RandomizeFirst(bot);
+
+        uint32 const queueType = GetEventValue(bot->GetGUIDLow(), "queue_driven_bg");
+        PlayerbotAI* ai = GetBotAI(bot);
+        if (queueType && ai && !bot->InBattleGroundQueue())
+        {
+            ai->GetAiObjectContext()->GetValue<uint32>("bg type")->Set(queueType);
+            if (ai->DoSpecificAction("bg join", Event(), true))
+                sLog.outDetail("Queue-driven BG: fresh bot #%u <%s> joined queue %u", bot->GetGUIDLow(), bot->GetName(), queueType);
+        }
+    }
+
     sLog.outDetail("%u/%d Bot %s logged in", GetPlayerbotsAmount(), sRandomPlayerbotMgr.GetMaxAllowedBotCount(), bot->GetName());
 	//if (loginProgressBar && playerBots.size() < sRandomPlayerbotMgr.GetMaxAllowedBotCount()) { loginProgressBar->step(); }
 	//if (loginProgressBar && playerBots.size() >= sRandomPlayerbotMgr.GetMaxAllowedBotCount() - 1) {

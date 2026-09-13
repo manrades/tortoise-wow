@@ -203,6 +203,15 @@ public:
         time_t PlayersCheckTimer;
         time_t EventTimeSyncTimer;
         time_t OfflineGroupBotsTimer;
+        struct QueueDrivenBgRequest
+        {
+            uint32 queueType = 0;
+            uint32 bracket = 0;
+            uint32 level = 1;
+            uint32 team = 0;
+            uint32 missing = 0;
+        };
+        void ForceQueueDrivenBattlegroundBots();
         uint32 AddRandomBots();
         uint32 GetQueueDrivenExtraTarget();
         bool HasQueueDrivenActiveRun() const;
@@ -328,6 +337,7 @@ public:
         uint32 queueDrivenBgDemand = 0;
         uint32 queueDrivenLfgDemand = 0;
         uint32 queueDrivenHeldExtra = 0;
+        std::vector<QueueDrivenBgRequest> queueDrivenBgRequests;
         time_t queueDrivenLastActivity = 0;
         time_t queueDrivenLastDemand = 0;
         std::list<uint32> arenaTeamMembers;
