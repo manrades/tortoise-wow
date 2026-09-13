@@ -1956,7 +1956,11 @@ void RandomPlayerbotMgr::CheckBgQueue()
         if (!player->InBattleGroundQueue())
             continue;
 
-        if (player->InBattleGround() && player->GetBattleGround()->GetStatus() == STATUS_WAIT_LEAVE)
+        // During battleground teardown a player can still carry the in-BG flag
+        // for one update while the instance pointer has already been cleared.
+        // Do not dereference that transient null pointer from queue maintenance.
+        if (player->InBattleGround() && player->GetBattleGround() &&
+            player->GetBattleGround()->GetStatus() == STATUS_WAIT_LEAVE)
             continue;
 
         for (int i = 0; i < PLAYER_MAX_BATTLEGROUND_QUEUES; ++i)
