@@ -12,6 +12,8 @@
 #include "playerbot/PlayerbotFactory.h"
 #include "playerbot/PerformanceMonitor.h"
 #include "strategy/values/LastMovementValue.h"
+#include "WorldSession.h"
+#include "WorldSession.h"
 #include "AccountMgr.h"
 #include "ObjectMgr.h"
 #include "Database/DatabaseEnv.h"
@@ -952,11 +954,23 @@ void RandomPlayerbotMgr::UpdateAIInternal(uint32 elapsed, bool minimal)
     uint32 updateBots = sPlayerbotAIConfig.randomBotsPerInterval;
     if (!updateBots)
         updateBots = 64;
-    availableBots.sort();
-    auto resume = std::find_if(availableBots.begin(), availableBots.end(),
-        [this](uint32 guid) { return guid > maintenanceCursorGuid; });
-    availableBots.splice(availableBots.end(), availableBots, availableBots.begin(), resume);
+    availableBots.sort([this](uint32 left, uint32 right)
+    {
+        bool const leftQueueDriven = GetEventValue(left, "queue_driven") != 0;
+        bool const rightQueueDriven = GetEventValue(right, "queue_driven") != 0;
+        if (leftQueueDriven != rightQueueDriven)
+            return leftQueueDriven;
+        return left < right;
+    });
+    bool const hasQueueDrivenReserve = std::any_of(availableBots.begin(), availableBots.end(),
+        [this](uint32 guid) { return GetEventValue(guid, "queue_driven") != 0 && !GetPlayerBot(guid); });
+    if (!hasQueueDrivenReserve)
+    {
+        auto resume = std::find_if(availableBots.begin(), availableBots.end(),
+            [this](uint32 guid) { return guid > maintenanceCursorGuid; });
+        availableBots.splice(availableBots.end(), availableBots, availableBots.begin(), resume);
 
+    }
     {
         DetailedWork::Scope batchWork(DetailedWork::MaintenanceBatch);
         WorkSlice slice(TurtleDiagnostics::Micros(), updateBots, 5000);
@@ -992,10 +1006,15 @@ void RandomPlayerbotMgr::UpdateAIInternal(uint32 elapsed, bool minimal)
     //Log in bots
     if (sRandomPlayerbotMgr.GetDatabaseDelay("CharacterDatabase") < 10 * IN_MILLISECONDS && !sPlayerbotAIConfig.asyncBotLogin && onlineBotCount < effectivePopulationTarget && maxLogins > 0)
     {
-        availableBots.sort();
-        auto loginResume = std::find_if(availableBots.begin(), availableBots.end(),
-            [this](uint32 guid) { return guid > loginCursorGuid; });
-        availableBots.splice(availableBots.end(), availableBots, availableBots.begin(), loginResume);
+        bool const hasQueueDrivenLogin = std::any_of(availableBots.begin(), availableBots.end(),
+            [this](uint32 guid) { return GetEventValue(guid, "queue_driven") != 0 && !GetPlayerBot(guid); });
+        if (!hasQueueDrivenLogin)
+        {
+            availableBots.sort();
+            auto loginResume = std::find_if(availableBots.begin(), availableBots.end(),
+                [this](uint32 guid) { return guid > loginCursorGuid; });
+            availableBots.splice(availableBots.end(), availableBots, availableBots.begin(), loginResume);
+        }
         WorkSlice loginSlice(TurtleDiagnostics::Micros(), 512, 2000);
         for (auto bot : availableBots)
         {
@@ -1755,6 +1774,44 @@ void RandomPlayerbotMgr::ForceQueueDrivenBattlegroundBots()
                     bot->GetGUIDLow(), bot->GetName(), request.queueType, request.bracket, request.team);
             }
         });
+
+        // A previous higher population target can leave random-bot `add`
+        // records behind after those sessions have gone offline. They are
+        // eligible reserve characters, not active population. Mark matching
+        // reserve bots for this request so the normal, budgeted login path
+        // brings them online before unrelated idle bots.
+        if (!request.missing)
+            continue;
+
+        auto reserve = CharacterDatabase.PQuery(
+            "SELECT DISTINCT c.guid, c.race FROM characters c "
+            "INNER JOIN ai_playerbot_random_bots r ON r.bot = c.guid "
+            "AND r.owner = 0 AND r.event = 'add' AND r.value = 1 "
+            "WHERE c.online = 0 ORDER BY c.guid");
+        if (!reserve)
+            continue;
+
+        uint32 assignedReserves = 0;
+        do
+        {
+            Field* fields = reserve->Fetch();
+            uint32 const guid = fields[0].GetUInt32();
+            uint32 const race = fields[1].GetUInt32();
+            if ((Player::TeamForRace(uint8(race)) == ALLIANCE ? 0u : 1u) != request.team ||
+                GetEventValue(guid, "queue_driven"))
+                continue;
+
+            if (assignedReserves >= request.missing)
+                break;
+
+            SetEventValue(guid, "queue_driven", 1, -1);
+            SetEventValue(guid, "queue_driven_level", request.level, -1);
+            SetEventValue(guid, "queue_driven_bg", request.queueType, -1);
+            SetEventValue(guid, "login", 0, 0);
+            sLog.outDetail("Queue-driven BG: reserve bot #%u assigned to queue %u bracket %u team %u",
+                guid, request.queueType, request.bracket, request.team);
+            ++assignedReserves;
+        } while (reserve->NextRow());
     }
 }
 
@@ -1863,11 +1920,19 @@ void RandomPlayerbotMgr::CheckBgQueue()
         }
     }
 
-    for (auto i : players)
+    // The playerbot manager's `players` cache is advisory: a real session can
+    // complete login or reconnect between cache maintenance passes. Battleground
+    // admission is owned by the core's active session map, so use that
+    // authoritative world-thread collection for demand detection.
+    for (auto const& sessionEntry : sWorld.GetAllSessions())
     {
-        Player* player = i.second;
+        WorldSession* session = sessionEntry.second;
+        Player* player = session ? session->GetPlayer() : nullptr;
 
         if (!player || !player->IsInWorld())
+            continue;
+
+        if (GetBotAI(player) || IsFreeBot(player))
             continue;
 
         if (!player->InBattleGroundQueue())
